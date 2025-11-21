@@ -1,3 +1,4 @@
+from collections import defaultdict
 from time import sleep
 from torrent_parser import parse_torrent_file, encode, BDecoder
 import os
@@ -129,11 +130,32 @@ class ContentFolder:
                 size = os.path.getsize(full_path)
                 relative_path = os.path.relpath(full_path, self.path)
                 self.files.append(ContentFile(relative_path, size))
-    def has_file(self, content_file):
-        for f in self.files:
-            if f.matches(content_file):
-                return True
-        return False
+    # def has_file(self, content_file: ContentFile):
+    #     for f in self.files:
+    #         if f.matches(content_file):
+    #             return True
+    #     return False
+    def find_matching_base_path(self, content_files: list[ContentFile]):
+        content_file_path_matches = defaultdict(list) # key: content_file.path, value: list of matching base path of my_file.path
+        for my_file in self.files:
+            for cf in content_files:
+                if my_file.matches(cf):
+                    my_base_path = my_file.path[:-len(cf.path)]
+                    content_file_path_matches[cf.path].append(my_base_path)
+        # find common base path for all content files
+        common_base_paths = None
+        for cf in content_files:
+            if cf.path not in content_file_path_matches:
+                return None
+            if common_base_paths is None:
+                common_base_paths = set(content_file_path_matches[cf.path])
+            else:
+                common_base_paths = common_base_paths.intersection(set(content_file_path_matches[cf.path]))
+            if not common_base_paths:
+                return None
+        # return one of the common base paths
+        return common_base_paths.pop() if common_base_paths else None
+
     def print_files(self,log_level='debug'):
         for file in self.files:
             Logger.log(log_level, f' - {file.path} (Size: {file.size} bytes)')
@@ -286,17 +308,14 @@ if __name__ == "__main__":
         #content_folder.print_files()
         for torrent in bt_backup_dir.iter_torrents():
             torrent.print_info(log_level='trace')
-            all_found = True
-            for content_file in torrent.get_content_files():
-                Logger.log("trace", f' - {content_file.path} (Size: {content_file.size} bytes)')
-                if content_folder.has_file(content_file):
-                    Logger.log("trace", f'   -> Found in content folder {content_dir_path}.')
-                else:
-                    Logger.log("trace", f'   -> Not found in content folder {content_dir_path}.')
-                    all_found = False
-            if all_found:
-                Logger.log("info", f'All files for torrent {torrent.torrent_file_path} found in content folder {content_dir_path}.')
-                content_dir_matches[torrent] = content_dir_path
+            matching_base_path = content_folder.find_matching_base_path(torrent.get_content_files())
+            if not matching_base_path:
+                Logger.log("debug", f'No matching base path found in content folder {content_dir_path} for torrent {torrent.torrent_file_path}.')
+                print('===')
+                continue
+            full_matching_base_path = os.path.join(content_dir_path, matching_base_path) 
+            content_dir_matches[torrent] = full_matching_base_path
+            Logger.log("debug", f'Found matching base path in content folder {content_dir_path} for torrent {torrent.torrent_file_path}: {full_matching_base_path}')
             print('===')
     if not args.dry_run:
         for torrent, content_dir_path in content_dir_matches.items():
