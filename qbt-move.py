@@ -1,5 +1,5 @@
 from time import sleep
-from torrent_parser import parse_torrent_file, encode, decode
+from torrent_parser import parse_torrent_file, encode, BDecoder
 import os
 import tarfile
 from datetime import datetime
@@ -68,7 +68,13 @@ class FastResumeFile:
             with open(self.fast_resume_file_path, 'rb') as file:
                 bencoded_data = file.read()
                 try:
-                    data = decode(bencoded_data)
+                    decoder = BDecoder(data=bencoded_data)
+                    # Tell the decoder that 'info-hash' should be treated as a hash field.
+                    # The arguments (20, False) mean:
+                    # - 20: The block length (20 bytes for a SHA-1 info hash)
+                    # - False: Don't force the output into a list of strings
+                    decoder.hash_field('info-hash', 20, False)
+                    data = decoder.decode()
                 except Exception as e:
                     Logger.log("error", f"Error decoding fast resume file {self.fast_resume_file_path}: {e}")
                     return
@@ -76,11 +82,19 @@ class FastResumeFile:
             for key in FastResumeFile.save_path_keywords:
                 if key in data:
                     old_path = data[key]
+                    # skip if old_path is already the new_path
+                    if os.path.abspath(old_path) == os.path.abspath(new_path):
+                        Logger.log("debug", f"'{key}' path in {self.fast_resume_file_path} is already '{new_path}'. No change needed.")
+                        continue
+                    # skip if original is empty string
+                    if old_path == '':
+                        Logger.log("debug", f"'{key}' path in {self.fast_resume_file_path} is empty. Skipping replacement.")
+                        continue
                     data[key] = new_path
                     Logger.log("debug", f"Replaced '{key}' path from '{old_path}' to '{new_path}' in {self.fast_resume_file_path}.")
                     modified = True
             if modified:
-                new_bencoded_data = encode(data)
+                new_bencoded_data = encode(data, hash_fields=['info-hash'])
                 with open(self.fast_resume_file_path, 'wb') as file:
                     file.write(new_bencoded_data)
                 Logger.log("info", f"Updated save paths in fast resume file {self.fast_resume_file_path}.")
@@ -209,9 +223,6 @@ class Logger:
         if Logger.loglevels[severity] >= Logger.loglevel:
             print(f"[{severity.upper()}] {message}")
 
-# bt_backup_dir_path = '/mnt/bigdata/share/BT_backup'
-# content_dir_paths = ['/mnt/bigdata/share/move/DL']
-
 
 if __name__ == "__main__":
     
@@ -291,7 +302,11 @@ if __name__ == "__main__":
         for torrent, content_dir_path in content_dir_matches.items():
             fast_resume_file = torrent.get_fast_resume_file()
             new_save_path = os.path.abspath(content_dir_path)
-            Logger.log("info", f'Updating fast resume file {fast_resume_file.fast_resume_file_path} to new save path {new_save_path}.')
+            Logger.log("debug", f'Updating fast resume file {fast_resume_file.fast_resume_file_path} to new save path {new_save_path} (if needed).')
             fast_resume_file.replace_save_paths(new_save_path)
+
+    if qbittorrent_restart and not args.dry_run:
+        Logger.log("info", f"Restarting QBittorrent with command: {qbittorrent_start_command}")
+        QBTorrent.start(qbittorrent_start_command)
     
 
