@@ -1,0 +1,20 @@
+[settings]
+# Path to QBittorrent's BT_Backup directory (contains .torrent and .fastresume files)
+bt_backup_dir_path = /path/to/.local/share/qBittorrent/BT_Backup
+
+# Comma-separated list of content directories to scan
+content_dir_paths = /path/to/content/dir1, /path/to/content/dir2
+
+# Backup settings
+backup_bt_backup = true
+backup_bt_backup_path = /path/to/backups
+
+# QBittorrent process management
+check_qbittorrent_running = true
+qbittorrent_process_name = qbittorrent-nox
+qbittorrent_stop_if_running = false
+qbittorrent_restart_after = false
+qbittorrent_stop_command = systemctl stop qbittorrent-nox
+qbittorrent_start_command = systemctl start qbittorrent-nox
+#how log to wait for qbt to shutdown
+qbittorrent_wait_after_stop = 10
