@@ -15,6 +15,7 @@ class QBT_File:
         self.torrent_info = TorrentParser.get_info(self.torrent_data)
         self.files = TorrentParser.get_files(self.torrent_info)
         self.name = TorrentParser.get_name(self.torrent_info)
+        self.is_multi_file = TorrentParser.is_multi_file(self.torrent_info)
     # remove .torrent extension and add .fastresume
     def get_fast_resume_file_path(self):
         return self.torrent_file_path.rsplit('.', 1)[0] + '.fastresume'
@@ -33,7 +34,7 @@ class QBT_File:
     def get_content_files(self):
         return [ContentFile(self.full_file_path(file['path']), file['size']) for file in self.files]
     def is_in_subdir(self):
-        return len(self.filenames()) > 1
+        return self.is_multi_file
     def get_subdir_name(self):
         if self.is_in_subdir():
             return self.name
@@ -76,13 +77,7 @@ class FastResumeFile:
             with open(self.fast_resume_file_path, 'rb') as file:
                 bencoded_data = file.read()
                 try:
-                    decoder = BDecoder(data=bencoded_data)
-                    # Tell the decoder that 'info-hash' should be treated as a hash field.
-                    # The arguments (20, False) mean:
-                    # - 20: The block length (20 bytes for a SHA-1 info hash)
-                    # - False: Don't force the output into a list of strings
-                    decoder.hash_field('info-hash', 20, False)
-                    decoder.hash_field('peers', 6, False)  # 'peers' field is a binary string
+                    decoder = BDecoder(data=bencoded_data, errors=BDecoder.ERROR_HANDLER_USEBYTES)
                     data = decoder.decode()
                 except Exception as e:
                     Logger.log("error", f"Error decoding fast resume file {self.fast_resume_file_path}: {e}")
@@ -103,12 +98,12 @@ class FastResumeFile:
                     Logger.log("debug", f"Replaced '{key}' path from '{old_path}' to '{new_path}' in {self.fast_resume_file_path}.")
                     modified = True
             if modified:
-                new_bencoded_data = encode(data, hash_fields=['info-hash', 'peers'])
+                new_bencoded_data = encode(data)
                 with open(self.fast_resume_file_path, 'wb') as file:
                     file.write(new_bencoded_data)
                 Logger.log("info", f"Updated save paths in fast resume file {self.fast_resume_file_path}.")
             else:
-                Logger.log("warning", f"No save path keys found to update in fast resume file {self.fast_resume_file_path}.")
+                Logger.log("trace", f"No save path keys to update in fast resume file {self.fast_resume_file_path}.")
         except Exception as e:
             Logger.log("error", f"Error processing fast resume file {self.fast_resume_file_path}: {e}")
 
@@ -228,6 +223,9 @@ class TorrentParser:
     @staticmethod
     def get_info(torrent_data):
         return torrent_data.get('info', {})
+    @staticmethod
+    def is_multi_file(torrent_info):
+        return 'files' in torrent_info
     @staticmethod
     def get_files(torrent_info):
         if 'files' in torrent_info:
