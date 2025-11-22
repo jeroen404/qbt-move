@@ -20,6 +20,8 @@ class QBT_File:
         return self.torrent_file_path.rsplit('.', 1)[0] + '.fastresume'
     def get_fast_resume_file(self):
         return FastResumeFile(self.get_fast_resume_file_path())
+    def has_fast_resume_file(self):
+        return os.path.isfile(self.get_fast_resume_file_path())
     def filenames(self):
         return [file['path'] for file in self.files]
     def full_file_paths(self):
@@ -36,6 +38,11 @@ class QBT_File:
         if self.is_in_subdir():
             return self.name
         return None
+    def get_name(self):
+        if self.is_in_subdir():
+            return self.get_subdir_name()
+        else:
+            return self.name
     def print_info(self,log_level='debug'):
         Logger.log(log_level, f'Torrent File: {self.torrent_file_path}')
         Logger.log(log_level, f'Fast Resume File: {self.get_fast_resume_file_path()}')
@@ -75,6 +82,7 @@ class FastResumeFile:
                     # - 20: The block length (20 bytes for a SHA-1 info hash)
                     # - False: Don't force the output into a list of strings
                     decoder.hash_field('info-hash', 20, False)
+                    decoder.hash_field('peers', 6, False)  # 'peers' field is a binary string
                     data = decoder.decode()
                 except Exception as e:
                     Logger.log("error", f"Error decoding fast resume file {self.fast_resume_file_path}: {e}")
@@ -95,7 +103,7 @@ class FastResumeFile:
                     Logger.log("debug", f"Replaced '{key}' path from '{old_path}' to '{new_path}' in {self.fast_resume_file_path}.")
                     modified = True
             if modified:
-                new_bencoded_data = encode(data, hash_fields=['info-hash'])
+                new_bencoded_data = encode(data, hash_fields=['info-hash', 'peers'])
                 with open(self.fast_resume_file_path, 'wb') as file:
                     file.write(new_bencoded_data)
                 Logger.log("info", f"Updated save paths in fast resume file {self.fast_resume_file_path}.")
@@ -146,6 +154,7 @@ class ContentFolder:
         common_base_paths = None
         for cf in content_files:
             if cf.path not in content_file_path_matches:
+                Logger.log("trace", f'No matches found for content file {cf.path} (size: {cf.size} bytes) in content folder {self.path}.')
                 return None
             if common_base_paths is None:
                 common_base_paths = set(content_file_path_matches[cf.path])
@@ -154,7 +163,7 @@ class ContentFolder:
             if not common_base_paths:
                 return None
         # return one of the common base paths
-        return common_base_paths.pop() if common_base_paths else None
+        return common_base_paths.pop() 
 
     def print_files(self,log_level='debug'):
         for file in self.files:
@@ -176,9 +185,10 @@ class BT_Backup_Directory:
             print(f"Error loading torrents from {self.path}: {e}")
     def get_torrents(self):
         return self.torrents
-    def iter_torrents(self):
+    def iter_torrents_with_fast_resume(self):
         for torrent in self.torrents:
-            yield torrent
+            if torrent.has_fast_resume_file():
+                yield torrent
     def backup(self, backup_dir_path):
         time_now = datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
@@ -252,6 +262,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default='config.ini', help='Path to configuration file')
     parser.add_argument('--log-level', type=str, default='info',help='Logging level (default: info)')
     parser.add_argument('--dry-run', action='store_true', help='Perform a dry run without making changes')
+    parser.add_argument('--delete-orphans', action='store_true', help='Delete orphaned torrents')
     args = parser.parse_args()
 
     if args.log_level in Logger.loglevels:
@@ -277,6 +288,7 @@ if __name__ == "__main__":
         qbittorrent_restart = config.getboolean('settings', 'qbittorrent_restart_after', fallback=False)
         qbittorrent_start_command = config.get('settings', 'qbittorrent_start_command', fallback=None)
         qbittorrent_stop_command = config.get('settings', 'qbittorrent_stop_command', fallback=None)
+        qbittorrent_wait_after_stop = config.getint('settings', 'qbittorrent_wait_after_stop', fallback=10)
         if qbittorrent_restart and not qbittorrent_start_command:
             raise Exception("Restart of QBittorrent is enabled but no restart command is specified.")
         Logger.log("info", f"Configuration loaded from {args.config}.")
@@ -289,7 +301,7 @@ if __name__ == "__main__":
             if qbittorrent_stop_if_running:
                 Logger.log("info", f"QBittorrent process '{qbittorrent_process_name}' is running. Stopping it now.")
                 QBTorrent.stop(qbittorrent_stop_command)
-                sleep(2)
+                sleep(qbittorrent_wait_after_stop)  # wait for process to stop
                 if QBTorrent.is_running(qbittorrent_process_name):
                     Logger.log("error", f"Failed to stop QBittorrent process '{qbittorrent_process_name}'. Please stop it manually and try again.")
                     exit(1)
@@ -302,21 +314,37 @@ if __name__ == "__main__":
         Logger.log("info", f"Backing up BT backup directory {bt_backup_dir_path} to {backup_bt_backup_path}")
         bt_backup_dir.backup(backup_bt_backup_path)
     content_dir_matches = {}
+    torrent_matches = {}
     for content_dir_path in content_dir_paths:        
         content_folder = ContentFolder(content_dir_path)
         content_folder.scan_files()
         #content_folder.print_files()
-        for torrent in bt_backup_dir.iter_torrents():
+        for torrent in bt_backup_dir.iter_torrents_with_fast_resume():
             torrent.print_info(log_level='trace')
             matching_base_path = content_folder.find_matching_base_path(torrent.get_content_files())
-            if not matching_base_path:
-                Logger.log("debug", f'No matching base path found in content folder {content_dir_path} for torrent {torrent.torrent_file_path}.')
-                print('===')
+            if matching_base_path is None:
+                Logger.log("debug", f'No matching base path found in content folder {content_dir_path} for torrent {torrent.get_name()}.')
                 continue
             full_matching_base_path = os.path.join(content_dir_path, matching_base_path) 
             content_dir_matches[torrent] = full_matching_base_path
-            Logger.log("debug", f'Found matching base path in content folder {content_dir_path} for torrent {torrent.torrent_file_path}: {full_matching_base_path}')
-            print('===')
+            torrent_matches[torrent] = True
+            Logger.log("info", f'Found matching base path in content folder {content_dir_path} for torrent {torrent.get_name()}: {full_matching_base_path}')
+    # report torrents with no matches
+    for torrent in bt_backup_dir.iter_torrents_with_fast_resume():
+        if torrent not in torrent_matches:
+            Logger.log("warning", f'No matching content folder found for torrent {torrent.get_name()} (file {torrent.torrent_file_path}).')
+            if args.delete_orphans and not args.dry_run:
+                fast_resume_file = torrent.get_fast_resume_file()
+                try:
+                    os.remove(torrent.torrent_file_path)
+                    Logger.log("info", f'Deleted orphaned torrent file {torrent.torrent_file_path}.')
+                except Exception as e:
+                    Logger.log("error", f'Error deleting orphaned torrent file {torrent.torrent_file_path}: {e}')
+                try:
+                    os.remove(fast_resume_file.fast_resume_file_path)
+                    Logger.log("info", f'Deleted orphaned fast resume file {fast_resume_file.fast_resume_file_path}.')
+                except Exception as e:
+                    Logger.log("error", f'Error deleting orphaned fast resume file {fast_resume_file.fast_resume_file_path}: {e}')
     if not args.dry_run:
         for torrent, content_dir_path in content_dir_matches.items():
             fast_resume_file = torrent.get_fast_resume_file()
