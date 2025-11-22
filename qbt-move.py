@@ -71,7 +71,7 @@ class FastResumeFile:
         ]
     def __init__(self, fast_resume_file_path):
         self.fast_resume_file_path = fast_resume_file_path
-        # Placeholder for actual fast resume file parsing
+
     def replace_save_paths(self, new_path):
         try:
             with open(self.fast_resume_file_path, 'rb') as file:
@@ -124,8 +124,10 @@ class ContentFolder:
     def __init__(self, path):
         self.path = path
         self.files = []
+
     def add_file(self, content_file):
         self.files.append(content_file)
+
     def scan_files(self):
         for root, dirs, files in os.walk(self.path):
             for file in files:
@@ -133,11 +135,7 @@ class ContentFolder:
                 size = os.path.getsize(full_path)
                 relative_path = os.path.relpath(full_path, self.path)
                 self.files.append(ContentFile(relative_path, size))
-    # def has_file(self, content_file: ContentFile):
-    #     for f in self.files:
-    #         if f.matches(content_file):
-    #             return True
-    #     return False
+
     def find_matching_base_path(self, content_files: list[ContentFile]):
         content_file_path_matches = defaultdict(list) # key: content_file.path, value: list of matching base path of my_file.path
         for my_file in self.files:
@@ -169,6 +167,7 @@ class BT_Backup_Directory:
         self.path = path
         self.torrents = []
         self.load_torrents()
+
     def load_torrents(self):
         try:
             for filename in os.listdir(self.path):
@@ -178,12 +177,14 @@ class BT_Backup_Directory:
                     self.torrents.append(qbt_file)
         except Exception as e:
             print(f"Error loading torrents from {self.path}: {e}")
+
     def get_torrents(self):
         return self.torrents
     def iter_torrents_with_fast_resume(self):
         for torrent in self.torrents:
             if torrent.has_fast_resume_file():
                 yield torrent
+
     def backup(self, backup_dir_path):
         time_now = datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
@@ -246,6 +247,7 @@ class Logger:
     "error": 4,
     }
     loglevel = loglevels["debug"]
+
     @staticmethod
     def log(severity: str, message: str):
         if severity not in Logger.loglevels:
@@ -311,6 +313,7 @@ if __name__ == "__main__":
     if backup_bt_backup and not args.dry_run:
         Logger.log("info", f"Backing up BT backup directory {bt_backup_dir_path} to {backup_bt_backup_path}")
         bt_backup_dir.backup(backup_bt_backup_path)
+
     content_dir_matches = {}
     torrent_matches = {}
     for content_dir_path in content_dir_paths:        
@@ -327,6 +330,7 @@ if __name__ == "__main__":
             content_dir_matches[torrent] = full_matching_base_path
             torrent_matches[torrent] = True
             Logger.log("info", f'Found matching base path in content folder {content_dir_path} for torrent {torrent.get_name()}: {full_matching_base_path}')
+
     # report torrents with no matches
     for torrent in bt_backup_dir.iter_torrents_with_fast_resume():
         if torrent not in torrent_matches:
@@ -343,6 +347,7 @@ if __name__ == "__main__":
                     Logger.log("info", f'Deleted orphaned fast resume file {fast_resume_file.fast_resume_file_path}.')
                 except Exception as e:
                     Logger.log("error", f'Error deleting orphaned fast resume file {fast_resume_file.fast_resume_file_path}: {e}')
+                    
     if not args.dry_run:
         for torrent, content_dir_path in content_dir_matches.items():
             fast_resume_file = torrent.get_fast_resume_file()
