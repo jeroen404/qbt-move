@@ -25,6 +25,13 @@ Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
+or 
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python qbt-move.py ...
+```
 
 ## Configuration
 
